@@ -68,10 +68,10 @@ const int REAR_RIGHT_MOTOR_FORWARD = 14;
 const int REAR_RIGHT_MOTOR_REVERSE = 27;
 
 // Arm and Gripper pins remain the same
-const int ARM_MOTOR_UP = 12;
-const int ARM_MOTOR_DOWN = 13;
-const int GRIPPER_MOTOR_OPEN = 15;
-const int GRIPPER_MOTOR_CLOSE = 2;
+const int ARM_MOTOR_UP = 12;//red
+const int ARM_MOTOR_DOWN = 13;//brown
+const int GRIPPER_MOTOR_OPEN = 18;//check
+const int GRIPPER_MOTOR_CLOSE = 19;//chechk
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
