@@ -1,64 +1,77 @@
 /*
  * ESP32 Wi-Fi Controlled Robot Car with Arm and Gripper
- * * This code turns your ESP32 into a web server that hosts a control panel for your robot.
- * You can access this panel from a phone, tablet, or computer on the same Wi-Fi network.
- * * HARDWARE REQUIRED:
- * 1. ESP32 Development Board
- * 2. Robot Chassis with 2 DC motors (for left and right wheels)
- * 3. Robotic Arm with 1 DC motor (for up/down movement)
- * 4. Gripper with 1 DC motor (for open/close)
- * 5. Motor Driver(s) - Two L298N modules or a single driver that can control 4 DC motors.
- * 6. Power source for motors (e.g., Li-ion batteries)
- * 7. Power source for ESP32 (can be the same, but use a voltage regulator for the ESP32)
+ * * MODIFIED VERSION:
+ * - Attempts to connect to a list of known Wi-Fi networks.
+ * - Uses a static IP address for predictable access.
+ * - Creates its own Wi-Fi Access Point (AP) as a fallback if no known networks are found.
+ * * HARDWARE REQUIRED: (Same as original)
  *
  * HOW TO USE:
- * 1. Install the "ESPAsyncWebServer" and "AsyncTCP" libraries in your Arduino IDE.
- * - Go to Sketch > Include Library > Manage Libraries...
- * - Search for "ESPAsyncWebServer" and install it.
- * - Search for "AsyncTCP" and install it.
- * 2. Update the `ssid` and `password` variables below with your Wi-Fi network credentials.
- * 3. Connect the motor driver pins to the ESP32 GPIO pins as defined in the "Pin Definitions" section.
- * 4. Upload the code to your ESP32.
- * 5. Open the Serial Monitor (Tools > Serial Monitor) and set the baud rate to 115200.
- * 6. The ESP32 will attempt to connect to your Wi-Fi and print its IP address.
- * 7. Type that IP address into a web browser on a device connected to the same Wi-Fi network.
- * 8. The control interface should appear, and you can now control your robot!
+ * 1. Install "ESPAsyncWebServer" and "AsyncTCP" libraries.
+ * 2. Update the `knownNetworks` array with your Wi-Fi credentials.
+ * 3. Update the `staticIP`, `gateway`, and `subnet` to match YOUR network configuration.
+ * 4. (Optional) Change the `ap_ssid` and `ap_password` for the fallback hotspot.
+ * 5. Upload the code to your ESP32.
+ * 6. Open the Serial Monitor at 115200 baud.
+ * 7. The ESP32 will print which network it connected to and its static IP address.
+ * 8. If it can't connect, it will create a hotspot. Connect to "RobotCar_AP" (or your custom name)
+ * with the password and navigate to 192.168.4.1 in your browser.
  */
 
 // ------------------- Libraries -------------------
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 
-// ------------------- Wi-Fi Credentials -------------------
-// Replace with your network credentials
-const char* ssid = "Devansh-jio";
-const char* password = "Devansh@#$2007";
+// ------------------- Wi-Fi Configuration -------------------
+
+// --- NEW: Define a structure to hold network credentials ---
+struct WiFiNetwork {
+    const char* ssid;
+    const char* password;
+};
+
+// --- NEW: List of known Wi-Fi networks to try ---
+// Add your networks here. The ESP32 will try them in order.
+WiFiNetwork knownNetworks[] = {
+    {"Devansh-jio", "Devansh@#$2007"},
+    {"MyHomeWiFi", "MyHomePassword"},
+    {"WorkshopNet", "Password12345"}
+};
+
+// --- NEW: Static IP Configuration ---
+// Set this to an IP address that is available on your network.
+IPAddress staticIP(192, 168, 1, 184);
+// Your router's IP address
+IPAddress gateway(192, 168, 1, 1);
+// Subnet mask (usually this is correct)
+IPAddress subnet(255, 255, 255, 0);
+
+// --- NEW: Access Point (Hotspot) credentials ---
+// This is used as a fallback if no known networks are found.
+const char* ap_ssid = "RobotCar_AP";
+const char* ap_password = "password";
+
 
 // ------------------- Pin Definitions -------------------
-// Connect these ESP32 pins to your motor driver(s).
-// This assumes a driver like the L298N.
-
-// Car Movement Motors
-const int LEFT_MOTOR_FORWARD = 26;  // IN1 on L298N for left motor
-const int LEFT_MOTOR_REVERSE = 25;  // IN2 on L298N for left motor
-const int RIGHT_MOTOR_FORWARD = 14; // IN3 on L298N for right motor
-const int RIGHT_MOTOR_REVERSE = 27; // IN4 on L298N for right motor
-
-// Arm Lift Motor
-const int ARM_MOTOR_UP = 12;   // Another motor driver channel
-const int ARM_MOTOR_DOWN = 13; // Another motor driver channel
-
-// Gripper Open/Close Motor
-const int GRIPPER_MOTOR_OPEN = 15;  // Another motor driver channel
-const int GRIPPER_MOTOR_CLOSE = 2; // Another motor driver channel
+// (No changes here, pins remain the same)
+const int LEFT_MOTOR_FORWARD = 26;
+const int LEFT_MOTOR_REVERSE = 25;
+const int RIGHT_MOTOR_FORWARD = 14;
+const int RIGHT_MOTOR_REVERSE = 27;
+const int ARM_MOTOR_UP = 12;
+const int ARM_MOTOR_DOWN = 13;
+const int GRIPPER_MOTOR_OPEN = 15;
+const int GRIPPER_MOTOR_CLOSE = 2;
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
-// ------------------- Web Page HTML -------------------
-// The complete HTML, CSS, and JavaScript for the control interface.
+// --- Web Page HTML (Assumed to be defined elsewhere or is not needed for this logic) ---
+// const char index_html[] PROGMEM = R"rawliteral( ... your html here ... )rawliteral";
+
 
 // ------------------- Motor Control Functions -------------------
+// (No changes in this section)
 void moveForward() {
     Serial.println("Moving Forward");
     digitalWrite(LEFT_MOTOR_FORWARD, HIGH);
@@ -141,6 +154,49 @@ void addCorsHeaders(AsyncWebServerResponse *response) {
     response->addHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
+// ------------------- NEW WiFi Connection Logic -------------------
+void connectToWiFi() {
+    Serial.println("Configuring static IP...");
+    if (!WiFi.config(staticIP, gateway, subnet)) {
+        Serial.println("STA Failed to configure");
+    }
+
+    int numNetworks = sizeof(knownNetworks) / sizeof(knownNetworks[0]);
+    for (int i = 0; i < numNetworks; i++) {
+        Serial.print("\nTrying to connect to: ");
+        Serial.println(knownNetworks[i].ssid);
+        WiFi.begin(knownNetworks[i].ssid, knownNetworks[i].password);
+
+        // Try to connect for 10 seconds
+        int attempts = 0;
+        while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+            delay(500);
+            Serial.print(".");
+            attempts++;
+        }
+
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.println("\n\nSUCCESS!");
+            Serial.print("Connected to ");
+            Serial.println(knownNetworks[i].ssid);
+            Serial.print("IP Address: ");
+            Serial.println(WiFi.localIP());
+            return; // Exit the function once connected
+        } else {
+            Serial.println("\nConnection failed.");
+        }
+    }
+
+    // If we're here, no known network was found. Start AP.
+    Serial.println("\nNo known Wi-Fi networks found. Starting Access Point.");
+    WiFi.softAP(ap_ssid, ap_password);
+    Serial.print("AP SSID: ");
+    Serial.println(ap_ssid);
+    Serial.print("AP IP Address: ");
+    Serial.println(WiFi.softAPIP());
+}
+
+
 // ------------------- Setup Function -------------------
 void setup() {
     Serial.begin(115200);
@@ -160,73 +216,27 @@ void setup() {
     stopArm();
     stopGripper();
 
-    // Connect to Wi-Fi
-    WiFi.begin(ssid, password);
-    Serial.print("Connecting to WiFi...");
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("\nConnected to WiFi!");
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
+    // --- NEW: Call the WiFi connection logic ---
+    connectToWiFi();
 
-    // --- Web Server Request Handlers ---
+    // --- Web Server Request Handlers (No changes here) ---
 
-    // Serve the main web page
-    //server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    // IMPORTANT: If you have HTML, uncomment this line
+    // server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     //    request->send_P(200, "text/html", index_html);
-    //});
+    // });
 
-    // Car Movement handlers
-    server.on("/forward", HTTP_GET, [](AsyncWebServerRequest *request){
-        moveForward();
-        request->send(200, "text/plain", "OK");
-    });
-    server.on("/reverse", HTTP_GET, [](AsyncWebServerRequest *request){
-        moveReverse();
-        request->send(200, "text/plain", "OK");
-    });
-    server.on("/left", HTTP_GET, [](AsyncWebServerRequest *request){
-        turnLeft();
-        request->send(200, "text/plain", "OK");
-    });
-    server.on("/right", HTTP_GET, [](AsyncWebServerRequest *request){
-        turnRight();
-        request->send(200, "text/plain", "OK");
-    });
-    server.on("/stop-car", HTTP_GET, [](AsyncWebServerRequest *request){
-        stopCar();
-        request->send(200, "text/plain", "OK");
-    });
-
-    // Arm handlers
-    server.on("/arm-up", HTTP_GET, [](AsyncWebServerRequest *request){
-        armUp();
-        request->send(200, "text/plain", "OK");
-    });
-    server.on("/arm-down", HTTP_GET, [](AsyncWebServerRequest *request){
-        armDown();
-        request->send(200, "text/plain", "OK");
-    });
-    server.on("/stop-arm", HTTP_GET, [](AsyncWebServerRequest *request){
-        stopArm();
-        request->send(200, "text/plain", "OK");
-    });
-
-    // Gripper handlers
-    server.on("/gripper-open", HTTP_GET, [](AsyncWebServerRequest *request){
-        gripperOpen();
-        request->send(200, "text/plain", "OK");
-    });
-    server.on("/gripper-close", HTTP_GET, [](AsyncWebServerRequest *request){
-        gripperClose();
-        request->send(200, "text/plain", "OK");
-    });
-    server.on("/stop-gripper", HTTP_GET, [](AsyncWebServerRequest *request){
-        stopGripper();
-        request->send(200, "text/plain", "OK");
-    });
+    server.on("/forward", HTTP_GET, [](AsyncWebServerRequest *request){ moveForward(); request->send(200, "text/plain", "OK"); });
+    server.on("/reverse", HTTP_GET, [](AsyncWebServerRequest *request){ moveReverse(); request->send(200, "text/plain", "OK"); });
+    server.on("/left", HTTP_GET, [](AsyncWebServerRequest *request){ turnLeft(); request->send(200, "text/plain", "OK"); });
+    server.on("/right", HTTP_GET, [](AsyncWebServerRequest *request){ turnRight(); request->send(200, "text/plain", "OK"); });
+    server.on("/stop-car", HTTP_GET, [](AsyncWebServerRequest *request){ stopCar(); request->send(200, "text/plain", "OK"); });
+    server.on("/arm-up", HTTP_GET, [](AsyncWebServerRequest *request){ armUp(); request->send(200, "text/plain", "OK"); });
+    server.on("/arm-down", HTTP_GET, [](AsyncWebServerRequest *request){ armDown(); request->send(200, "text/plain", "OK"); });
+    server.on("/stop-arm", HTTP_GET, [](AsyncWebServerRequest *request){ stopArm(); request->send(200, "text/plain", "OK"); });
+    server.on("/gripper-open", HTTP_GET, [](AsyncWebServerRequest *request){ gripperOpen(); request->send(200, "text/plain", "OK"); });
+    server.on("/gripper-close", HTTP_GET, [](AsyncWebServerRequest *request){ gripperClose(); request->send(200, "text/plain", "OK"); });
+    server.on("/stop-gripper", HTTP_GET, [](AsyncWebServerRequest *request){ stopGripper(); request->send(200, "text/plain", "OK"); });
 
     server.onNotFound([](AsyncWebServerRequest *request) {
         if (request->method() == HTTP_OPTIONS) {
@@ -246,5 +256,5 @@ void setup() {
 // ------------------- Loop Function -------------------
 void loop() {
     // The AsyncWebServer handles client requests in the background.
-    // No need to add code here for the web server.
+    // No code is needed here.
 }
