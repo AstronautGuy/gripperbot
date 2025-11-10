@@ -1,0 +1,6 @@
+adafruit/Adafruit Unified Sensor @ ^1.1.4
+adafruit/Adafruit BME280 Library @ ^2.1.0
+ESP32Async/AsyncTCP
+ESP32Async/ESPAsyncWebServer
+arduino-libraries/Arduino_JSON @ 0.1.0
+esp32Servo
